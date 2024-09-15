@@ -1,5 +1,7 @@
 use std::cmp::Ordering;
 
+/// A Cumulative Distribution Function (CDF) is a representation of a probability
+/// distribution that can be manipulated in various ways.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CDF {
     data: Vec<u16>,
@@ -7,6 +9,9 @@ pub struct CDF {
 }
 
 impl CDF {
+    /// Create a new CDF from a vector of data and a bin size.
+    /// The data vector must contain values between 0 and 1, and must be
+    /// monotonically increasing.
     pub fn new(data: Vec<f64>, bin_size: f64) -> Result<Self, &'static str> {
         if !data.iter().all(|&x| x >= 0.0 && x <= 1.0) {
             return Err("Data vector must contain values between 0 and 1");
@@ -21,6 +26,8 @@ impl CDF {
         })
     }
 
+    /// Combine two CDFs by choosing between them, using the given fraction as the probability for
+    /// the first CDF.
     pub fn choice(&self, fraction: f64, other: &CDF) -> Result<CDF, &'static str> {
         if self.bin_size != other.bin_size {
             return Err("CDFs must have the same bin size for addition");
@@ -49,6 +56,7 @@ impl CDF {
         })
     }
 
+    /// Combine two CDFs by universal quantification, meaning that both outcomes must occur.
     pub fn for_all(&self, other: &CDF) -> Result<CDF, &'static str> {
         if self.bin_size != other.bin_size {
             return Err("CDFs must have the same bin size for for_all");
@@ -68,6 +76,7 @@ impl CDF {
         })
     }
 
+    /// Combine two CDFs by existential quantification, meaning that at least one of the outcomes
     pub fn for_some(&self, other: &CDF) -> Result<CDF, &'static str> {
         if self.bin_size != other.bin_size {
             return Err("CDFs must have the same bin size for for_some");
@@ -94,6 +103,8 @@ impl CDF {
         })
     }
 
+    /// Convolve two CDFs, which is equivalent to taking the sum of all possible outcomes of the
+    /// two CDFs. This describes the distribution of the sum of two independent random variables.
     pub fn convolve(&self, other: &CDF) -> Result<CDF, &'static str> {
         if self.bin_size != other.bin_size {
             return Err("CDFs must have the same bin size for convolution");
