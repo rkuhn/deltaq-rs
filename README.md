@@ -10,7 +10,7 @@ The underlying ΔQ expressions shall be used for export/import of the model, com
 
 The first step is to provide a library for manipulating CDFs, offering all operations required by the theory; the internal representation will be discrete numerical [DONE], with later optimizations for constant parts at the beginning and end of the vector.
 
-The second step yields an internal DSL for creating ΔQ expressions and printing them.
+The second step yields an internal DSL for creating ΔQ expressions and printing them. [DONE]
 
 The third step provides evaluation of ΔQ expressions as defined in the paper.
 This will later be expanded to include some exponentiation-like operator that simplifies expressing a randomly chosen repetition count for some sub-expression (as frequently occurs in gossip protocols).
