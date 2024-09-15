@@ -21,7 +21,7 @@ impl CDF {
         })
     }
 
-    pub fn add(&self, other: &CDF, fraction: f64) -> Result<CDF, &'static str> {
+    pub fn choice(&self, fraction: f64, other: &CDF) -> Result<CDF, &'static str> {
         if self.bin_size != other.bin_size {
             return Err("CDFs must have the same bin size for addition");
         }
@@ -31,13 +31,17 @@ impl CDF {
         if fraction < 0.0 || fraction > 1.0 {
             return Err("Fraction must be between 0 and 1");
         }
-        let fraction = (fraction * 65535.0) as u16;
-        let my_fraction = 65535 - fraction;
+        let my_fraction = to_int(fraction);
+        let fraction = to_int(1.0 - fraction);
         let combined_data: Vec<u16> = self
             .data
             .iter()
             .zip(&other.data)
-            .map(|(&x, &y)| mul(x, my_fraction) + mul(y, fraction))
+            .map(|(&x, &y)| {
+                mul(x, my_fraction)
+                    .checked_add(mul(y, fraction))
+                    .expect("addition overflow")
+            })
             .collect();
         Ok(CDF {
             data: combined_data,
@@ -45,18 +49,44 @@ impl CDF {
         })
     }
 
-    pub fn multiply(&self, other: &CDF) -> Result<CDF, &'static str> {
+    pub fn for_all(&self, other: &CDF) -> Result<CDF, &'static str> {
         if self.bin_size != other.bin_size {
-            return Err("CDFs must have the same bin size for multiplication");
+            return Err("CDFs must have the same bin size for for_all");
         }
         if self.data.len() != other.data.len() {
-            return Err("CDFs must have the same length for multiplication");
+            return Err("CDFs must have the same length for for_all");
         }
         let multiplied_data: Vec<u16> = self
             .data
             .iter()
             .zip(&other.data)
             .map(|(&x, &y)| mul(x, y))
+            .collect();
+        Ok(CDF {
+            data: multiplied_data,
+            bin_size: self.bin_size,
+        })
+    }
+
+    pub fn for_some(&self, other: &CDF) -> Result<CDF, &'static str> {
+        if self.bin_size != other.bin_size {
+            return Err("CDFs must have the same bin size for for_some");
+        }
+        if self.data.len() != other.data.len() {
+            return Err("CDFs must have the same length for for_some");
+        }
+        let multiplied_data: Vec<u16> = self
+            .data
+            .iter()
+            .zip(&other.data)
+            .map(|(&x, &y)| {
+                u16::try_from(
+                    (x as u32 + y as u32)
+                        .checked_sub(mul(x, y) as u32)
+                        .expect("subtraction underflow during for_some"),
+                )
+                .expect("overflow during for_some")
+            })
             .collect();
         Ok(CDF {
             data: multiplied_data,
@@ -117,6 +147,10 @@ fn mul(x: u16, y: u16) -> u16 {
     ((x as u32 * y as u32 + 65535) >> 16) as u16
 }
 
+fn to_int(x: f64) -> u16 {
+    (x * 65536.0).min(65535.0) as u16
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,13 +175,18 @@ mod tests {
     }
 
     #[test]
-    fn test_addition() {
+    fn test_choice() {
         let left = CDF::new(vec![0.0, 0.0, 0.5, 1.0, 1.0], 0.25).unwrap();
         let right = CDF::new(vec![0.0, 1.0, 1.0, 1.0, 1.0], 0.25).unwrap();
-        let added = left.add(&right, 0.3).unwrap();
+        let added = left.choice(0.7, &right).unwrap();
         assert_eq!(
             added,
             CDF::new(vec![0.0, 0.3, 0.65, 1.0, 1.0], 0.25).unwrap()
+        );
+        let added = left.choice(1.0, &right).unwrap();
+        assert_eq!(
+            added,
+            CDF::new(vec![0.0, 0.0, 0.5, 1.0, 1.0], 0.25).unwrap()
         );
     }
 
@@ -170,6 +209,28 @@ mod tests {
         assert_eq!(
             convolved,
             CDF::new(vec![0.0, 0.0, 0.0, 0.18, 0.3, 0.72, 1.0], 1.0).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_for_all() {
+        let left = CDF::new(vec![0.0, 0.5, 0.75, 1.0], 0.25).unwrap();
+        let right = CDF::new(vec![0.0, 0.25, 0.5, 1.0], 0.25).unwrap();
+        let result = left.for_all(&right).unwrap();
+        assert_eq!(
+            result,
+            CDF::new(vec![0.0, 0.12501, 0.375, 1.0], 0.25).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_for_some() {
+        let left = CDF::new(vec![0.0, 0.5, 0.75, 1.0], 0.25).unwrap();
+        let right = CDF::new(vec![0.0, 0.25, 0.5, 1.0], 0.25).unwrap();
+        let result = left.for_some(&right).unwrap();
+        assert_eq!(
+            result,
+            CDF::new(vec![0.0, 0.62499, 0.875, 1.0], 0.25).unwrap()
         );
     }
 
