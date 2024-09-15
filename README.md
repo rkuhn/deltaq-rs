@@ -8,7 +8,7 @@ The underlying ΔQ expressions shall be used for export/import of the model, com
 
 ## Implementation plan
 
-The first step is to provide a library for manipulating CDFs, offering all operations required by the theory; the internal representation will be discrete numerical, with later optimizations for constant parts at the beginning and end of the vector.
+The first step is to provide a library for manipulating CDFs, offering all operations required by the theory; the internal representation will be discrete numerical [DONE], with later optimizations for constant parts at the beginning and end of the vector.
 
 The second step yields an internal DSL for creating ΔQ expressions and printing them.
 
