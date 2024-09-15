@@ -1,5 +1,19 @@
+use crate::CDFError;
 use crate::CDF;
+use std::collections::BTreeMap;
 use std::fmt::{self, Display};
+
+#[derive(Debug, PartialEq)]
+pub enum DeltaQError {
+    CDFError(CDFError),
+    NameError(String),
+}
+
+impl From<CDFError> for DeltaQError {
+    fn from(e: CDFError) -> DeltaQError {
+        DeltaQError::CDFError(e)
+    }
+}
 
 /// A DeltaQ is a representation of a probability distribution that can be
 /// manipulated in various ways.
@@ -112,32 +126,48 @@ impl DeltaQ {
         }
     }
 
-    pub fn eval(&self) -> Result<CDF, &'static str> {
+    pub fn eval(&self, ctx: &mut BTreeMap<String, DeltaQ>) -> Result<CDF, DeltaQError> {
         match self {
-            DeltaQ::Name(_) => Err("Cannot evaluate a name"),
+            DeltaQ::Name(n) => {
+                if let Some(dq) = ctx.remove(n) {
+                    let ret = dq.eval(ctx)?;
+                    ctx.insert(n.to_owned(), dq);
+                    Ok(ret)
+                } else {
+                    Err(DeltaQError::NameError(n.to_owned()))
+                }
+            }
             DeltaQ::CDF(cdf) => Ok(cdf.clone()),
             DeltaQ::Seq(first, second) => {
-                let first_cdf = first.eval()?;
-                let second_cdf = second.eval()?;
-                first_cdf.convolve(&second_cdf)
+                let first_cdf = first.eval(ctx)?;
+                let second_cdf = second.eval(ctx)?;
+                first_cdf
+                    .convolve(&second_cdf)
+                    .map_err(DeltaQError::CDFError)
             }
             DeltaQ::Choice(first, first_fraction, second, second_fraction) => {
-                let first_cdf = first.eval()?;
-                let second_cdf = second.eval()?;
-                first_cdf.choice(
-                    *first_fraction / (*first_fraction + *second_fraction),
-                    &second_cdf,
-                )
+                let first_cdf = first.eval(ctx)?;
+                let second_cdf = second.eval(ctx)?;
+                first_cdf
+                    .choice(
+                        *first_fraction / (*first_fraction + *second_fraction),
+                        &second_cdf,
+                    )
+                    .map_err(DeltaQError::CDFError)
             }
             DeltaQ::ForAll(first, second) => {
-                let first_cdf = first.eval()?;
-                let second_cdf = second.eval()?;
-                first_cdf.for_all(&second_cdf)
+                let first_cdf = first.eval(ctx)?;
+                let second_cdf = second.eval(ctx)?;
+                first_cdf
+                    .for_all(&second_cdf)
+                    .map_err(DeltaQError::CDFError)
             }
             DeltaQ::ForSome(first, second) => {
-                let first_cdf = first.eval()?;
-                let second_cdf = second.eval()?;
-                first_cdf.for_some(&second_cdf)
+                let first_cdf = first.eval(ctx)?;
+                let second_cdf = second.eval(ctx)?;
+                first_cdf
+                    .for_some(&second_cdf)
+                    .map_err(DeltaQError::CDFError)
             }
         }
     }
@@ -146,6 +176,7 @@ impl DeltaQ {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use maplit::btreemap;
 
     #[test]
     fn test_display_name() {
@@ -155,7 +186,7 @@ mod tests {
 
     #[test]
     fn test_display_cdf() {
-        let cdf = CDF::new(vec![0.0, 0.2, 0.9], 1.0).unwrap();
+        let cdf = CDF::new(&[0.0, 0.2, 0.9], 1.0).unwrap();
         let dq = DeltaQ::cdf(cdf.clone());
         assert_eq!(dq.to_string(), format!("{:?}", cdf));
     }
@@ -231,5 +262,58 @@ mod tests {
             DeltaQ::choice(dq3, 1.0, dq4, 2.0),
         );
         assert_eq!(nested_for_some.to_string(), "∃(∃(A | B) | C 1⇌2 D)");
+    }
+
+    #[test]
+    fn test_scenario_from_paper_64k() {
+        let mut ctx = btreemap! {
+            "single".to_owned() => DeltaQ::cdf(CDF::step(
+                &[(0.024, 1.0 / 3.0), (0.143, 2.0 / 3.0), (0.531, 1.0)],
+                0.01,
+                300,
+            )
+            .unwrap()),
+            "model2".to_owned() => DeltaQ::choice(
+                DeltaQ::name("single"),
+                1.0,
+                DeltaQ::seq(DeltaQ::name("single"), DeltaQ::name("single")),
+                100.0,
+            ),
+            "model3".to_owned() => DeltaQ::choice(
+                DeltaQ::name("single"),
+                1.0,
+                DeltaQ::seq(DeltaQ::name("single"), DeltaQ::name("model2")),
+                100.0,
+            ),
+            "model4".to_owned() => DeltaQ::choice(
+                DeltaQ::name("single"),
+                1.0,
+                DeltaQ::seq(DeltaQ::name("single"), DeltaQ::name("model3")),
+                100.0,
+            ),
+            "model5".to_owned() => DeltaQ::choice(
+                DeltaQ::name("single"),
+                1.0,
+                DeltaQ::seq(DeltaQ::name("single"), DeltaQ::name("model4")),
+                100.0,
+            ),
+        };
+        let result = DeltaQ::name("model5").eval(&mut ctx).unwrap();
+        assert_eq!(result.to_string(), "CDF[(0.0200, 0.0033), (0.0400, 0.0044), (0.0600, 0.0048), (0.0800, 0.0049), (0.1000, 0.0089), (0.1400, 0.0122), (0.1600, 0.0144), (0.1800, 0.0155), (0.2000, 0.0159), (0.2200, 0.0357), (0.2800, 0.0368), (0.3000, 0.0379), (0.3200, 0.0386), (0.3400, 0.0782), (0.4200, 0.0786), (0.4400, 0.0791), (0.4600, 0.1187), (0.5300, 0.1220), (0.5500, 0.1241), (0.5600, 0.1242), (0.5700, 0.1253), (0.5800, 0.1451), (0.5900, 0.1456), (0.6100, 0.1654), (0.6700, 0.1676), (0.6900, 0.1697), (0.7000, 0.1737), (0.7100, 0.1751), (0.7300, 0.2542), (0.8100, 0.2553), (0.8300, 0.2567), (0.8500, 0.3753), (0.9500, 0.3758), (0.9700, 0.4549), (1.0600, 0.4560), (1.0800, 0.4570), (1.0900, 0.4768), (1.1000, 0.4775), (1.1200, 0.5171), (1.2000, 0.5181), (1.2200, 0.5195), (1.2400, 0.6381), (1.3400, 0.6388), (1.3600, 0.7575), (1.4800, 0.7970), (1.5900, 0.7974), (1.6100, 0.7978), (1.6300, 0.8374), (1.7300, 0.8378), (1.7500, 0.9169), (1.8700, 0.9564), (2.1200, 0.9565), (2.1400, 0.9763), (2.2600, 0.9960), (2.6500, 1.0000)]");
+    }
+
+    #[test]
+    fn test_recursive_deltaq() {
+        let mut ctx = btreemap! {
+            "recursive".to_owned() => DeltaQ::choice(
+                DeltaQ::name("base"),
+                1.0,
+                DeltaQ::seq(DeltaQ::name("base"), DeltaQ::name("recursive")),
+                1.0,
+            ),
+            "base".to_owned() => DeltaQ::cdf(CDF::new(&[0.0, 0.5, 1.0], 1.0).unwrap()),
+        };
+        let result = DeltaQ::name("recursive").eval(&mut ctx).unwrap_err();
+        assert_eq!(result, DeltaQError::NameError("recursive".to_owned()));
     }
 }

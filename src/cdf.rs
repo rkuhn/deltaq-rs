@@ -1,23 +1,81 @@
 use std::cmp::Ordering;
 
+#[derive(Debug, PartialEq)]
+pub enum CDFError {
+    InvalidDataRange,
+    NonMonotonicData,
+    BinSizeMismatch,
+    LengthMismatch,
+    InvalidFraction,
+}
+
+impl std::fmt::Display for CDFError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CDFError::InvalidDataRange => {
+                write!(f, "Data vector must contain values between 0 and 1")
+            }
+            CDFError::NonMonotonicData => write!(
+                f,
+                "Data vector must contain monotonically increasing values"
+            ),
+            CDFError::BinSizeMismatch => write!(f, "CDFs must have the same bin size"),
+            CDFError::LengthMismatch => write!(f, "CDFs must have the same length"),
+            CDFError::InvalidFraction => write!(f, "Fraction must be between 0 and 1"),
+        }
+    }
+}
+
+impl std::error::Error for CDFError {}
+
 /// A Cumulative Distribution Function (CDF) is a representation of a probability
 /// distribution that can be manipulated in various ways.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct CDF {
     data: Vec<u16>,
     bin_size: f64,
+}
+
+impl std::fmt::Debug for CDF {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CDF")
+            .field("data", &self.to_string())
+            .field("bin_size", &self.bin_size)
+            .field("len", &self.data.len())
+            .finish()
+    }
+}
+
+impl std::fmt::Display for CDF {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut last_value = 0;
+        write!(f, "CDF[")?;
+        for (i, &value) in self.data.iter().enumerate() {
+            let value_f64 = (value as f64 / 65535.0).min(1.0);
+            if value != last_value {
+                if last_value != 0 {
+                    write!(f, ", ")?;
+                }
+                let x = i as f64 * self.bin_size;
+                write!(f, "({:.4}, {:.4})", x, value_f64)?;
+                last_value = value;
+            }
+        }
+        write!(f, "]")?;
+        Ok(())
+    }
 }
 
 impl CDF {
     /// Create a new CDF from a vector of data and a bin size.
     /// The data vector must contain values between 0 and 1, and must be
     /// monotonically increasing.
-    pub fn new(data: Vec<f64>, bin_size: f64) -> Result<Self, &'static str> {
+    pub fn new(data: &[f64], bin_size: f64) -> Result<Self, CDFError> {
         if !data.iter().all(|&x| x >= 0.0 && x <= 1.0) {
-            return Err("Data vector must contain values between 0 and 1");
+            return Err(CDFError::InvalidDataRange);
         }
         if !data.windows(2).all(|w| w[0] <= w[1]) {
-            return Err("Data vector must contain monotonically increasing values");
+            return Err(CDFError::NonMonotonicData);
         }
         let converted_data: Vec<u16> = data.iter().map(|&x| (x * 65535.0) as u16).collect();
         Ok(Self {
@@ -26,20 +84,46 @@ impl CDF {
         })
     }
 
+    /// Create a step function CDF from a vector of (x, y) pairs.
+    /// The x values must be greater than 0 and must be strictly monotonically increasing.
+    /// The y values must be from (0, 1] and must be strictly monotonically increasing.
+    pub fn step(points: &[(f64, f64)], bin_size: f64, bins: usize) -> Result<Self, CDFError> {
+        if !points.iter().all(|&(x, y)| x >= 0.0 && y > 0.0 && y <= 1.0) {
+            return Err(CDFError::InvalidDataRange);
+        }
+        if !points
+            .windows(2)
+            .all(|w| w[0].0 < w[1].0 && w[0].1 < w[1].1)
+        {
+            return Err(CDFError::NonMonotonicData);
+        }
+        let mut data = vec![0u16; bins];
+        for &(x, y) in points {
+            let index = (x / bin_size).floor() as usize;
+            data[index] = to_int(y);
+        }
+        for i in 1..data.len() {
+            if data[i] == 0 {
+                data[i] = data[i - 1];
+            }
+        }
+        Ok(Self { data, bin_size })
+    }
+
     /// Combine two CDFs by choosing between them, using the given fraction as the probability for
     /// the first CDF.
-    pub fn choice(&self, fraction: f64, other: &CDF) -> Result<CDF, &'static str> {
+    pub fn choice(&self, fraction: f64, other: &CDF) -> Result<CDF, CDFError> {
         if self.bin_size != other.bin_size {
-            return Err("CDFs must have the same bin size for addition");
+            return Err(CDFError::BinSizeMismatch);
         }
         if self.data.len() != other.data.len() {
-            return Err("CDFs must have the same length for addition");
+            return Err(CDFError::LengthMismatch);
         }
         if fraction < 0.0 || fraction > 1.0 {
-            return Err("Fraction must be between 0 and 1");
+            return Err(CDFError::InvalidFraction);
         }
         let my_fraction = to_int(fraction);
-        let fraction = to_int(1.0 - fraction);
+        let fraction = 65535 - my_fraction;
         let combined_data: Vec<u16> = self
             .data
             .iter()
@@ -57,12 +141,12 @@ impl CDF {
     }
 
     /// Combine two CDFs by universal quantification, meaning that both outcomes must occur.
-    pub fn for_all(&self, other: &CDF) -> Result<CDF, &'static str> {
+    pub fn for_all(&self, other: &CDF) -> Result<CDF, CDFError> {
         if self.bin_size != other.bin_size {
-            return Err("CDFs must have the same bin size for for_all");
+            return Err(CDFError::BinSizeMismatch);
         }
         if self.data.len() != other.data.len() {
-            return Err("CDFs must have the same length for for_all");
+            return Err(CDFError::LengthMismatch);
         }
         let multiplied_data: Vec<u16> = self
             .data
@@ -77,12 +161,12 @@ impl CDF {
     }
 
     /// Combine two CDFs by existential quantification, meaning that at least one of the outcomes
-    pub fn for_some(&self, other: &CDF) -> Result<CDF, &'static str> {
+    pub fn for_some(&self, other: &CDF) -> Result<CDF, CDFError> {
         if self.bin_size != other.bin_size {
-            return Err("CDFs must have the same bin size for for_some");
+            return Err(CDFError::BinSizeMismatch);
         }
         if self.data.len() != other.data.len() {
-            return Err("CDFs must have the same length for for_some");
+            return Err(CDFError::LengthMismatch);
         }
         let multiplied_data: Vec<u16> = self
             .data
@@ -105,12 +189,12 @@ impl CDF {
 
     /// Convolve two CDFs, which is equivalent to taking the sum of all possible outcomes of the
     /// two CDFs. This describes the distribution of the sum of two independent random variables.
-    pub fn convolve(&self, other: &CDF) -> Result<CDF, &'static str> {
+    pub fn convolve(&self, other: &CDF) -> Result<CDF, CDFError> {
         if self.bin_size != other.bin_size {
-            return Err("CDFs must have the same bin size for convolution");
+            return Err(CDFError::BinSizeMismatch);
         }
         if self.data.len() != other.data.len() {
-            return Err("CDFs must have the same length for convolution");
+            return Err(CDFError::LengthMismatch);
         }
         let len = self.data.len();
         let mut convolved_data: Vec<u16> = vec![0; len];
@@ -159,7 +243,7 @@ fn mul(x: u16, y: u16) -> u16 {
 }
 
 fn to_int(x: f64) -> u16 {
-    (x * 65536.0).min(65535.0) as u16
+    (x * 65536.0 + 0.5).min(65535.0) as u16
 }
 
 #[cfg(test)]
@@ -168,89 +252,71 @@ mod tests {
 
     #[test]
     fn test_new() {
-        let data = vec![0.0, 0.25, 0.5, 0.75, 1.0];
-        let cdf = CDF::new(data.clone(), 0.25).unwrap();
+        let cdf = CDF::new(&[0.0, 0.25, 0.5, 0.75, 1.0], 0.25).unwrap();
         assert_eq!(cdf.data, vec![0, 16383, 32767, 49151, 65535]);
         assert_eq!(cdf.bin_size, 0.25);
 
-        let data = vec![0.0, 0.25, 0.5, 0.75, 1.1];
-        let cdf = CDF::new(data.clone(), 0.25);
-        assert_eq!(cdf, Err("Data vector must contain values between 0 and 1"));
+        let cdf = CDF::new(&[0.0, 0.25, 0.5, 0.75, 1.1], 0.25);
+        assert_eq!(cdf, Err(CDFError::InvalidDataRange));
 
-        let data = vec![0.0, 0.25, 0.5, 0.75, 0.5];
-        let cdf = CDF::new(data.clone(), 0.25);
-        assert_eq!(
-            cdf,
-            Err("Data vector must contain monotonically increasing values")
-        );
+        let cdf = CDF::new(&[0.0, 0.25, 0.5, 0.75, 0.5], 0.25);
+        assert_eq!(cdf, Err(CDFError::NonMonotonicData));
     }
 
     #[test]
     fn test_choice() {
-        let left = CDF::new(vec![0.0, 0.0, 0.5, 1.0, 1.0], 0.25).unwrap();
-        let right = CDF::new(vec![0.0, 1.0, 1.0, 1.0, 1.0], 0.25).unwrap();
+        let left = CDF::new(&[0.0, 0.0, 0.5, 1.0, 1.0], 0.25).unwrap();
+        let right = CDF::new(&[0.0, 1.0, 1.0, 1.0, 1.0], 0.25).unwrap();
         let added = left.choice(0.7, &right).unwrap();
-        assert_eq!(
-            added,
-            CDF::new(vec![0.0, 0.3, 0.65, 1.0, 1.0], 0.25).unwrap()
-        );
+        assert_eq!(added, CDF::new(&[0.0, 0.3, 0.65, 1.0, 1.0], 0.25).unwrap());
         let added = left.choice(1.0, &right).unwrap();
-        assert_eq!(
-            added,
-            CDF::new(vec![0.0, 0.0, 0.5, 1.0, 1.0], 0.25).unwrap()
-        );
+        assert_eq!(added, CDF::new(&[0.0, 0.0, 0.5, 1.0, 1.0], 0.25).unwrap());
     }
 
     #[test]
     fn test_convolve_step() {
-        let left = CDF::new(vec![0.0, 1.0, 1.0, 1.0, 1.0], 1.0).unwrap();
-        let right = CDF::new(vec![0.0, 0.0, 1.0, 1.0, 1.0], 1.0).unwrap();
+        let left = CDF::new(&[0.0, 1.0, 1.0, 1.0, 1.0], 1.0).unwrap();
+        let right = CDF::new(&[0.0, 0.0, 1.0, 1.0, 1.0], 1.0).unwrap();
         let convolved = left.convolve(&right).unwrap();
         assert_eq!(
             convolved,
-            CDF::new(vec![0.0, 0.0, 0.0, 1.0, 1.0], 1.0).unwrap()
+            CDF::new(&[0.0, 0.0, 0.0, 1.0, 1.0], 1.0).unwrap()
         );
     }
 
     #[test]
     fn test_convolve_two() {
-        let left = CDF::new(vec![0.0, 0.3, 0.3, 1.0, 1.0, 1.0, 1.0], 1.0).unwrap();
-        let right = CDF::new(vec![0.0, 0.0, 0.6, 1.0, 1.0, 1.0, 1.0], 1.0).unwrap();
+        let left = CDF::new(&[0.0, 0.3, 0.3, 1.0, 1.0, 1.0, 1.0], 1.0).unwrap();
+        let right = CDF::new(&[0.0, 0.0, 0.6, 1.0, 1.0, 1.0, 1.0], 1.0).unwrap();
         let convolved = left.convolve(&right).unwrap();
         assert_eq!(
             convolved,
-            CDF::new(vec![0.0, 0.0, 0.0, 0.18, 0.3, 0.72, 1.0], 1.0).unwrap()
+            CDF::new(&[0.0, 0.0, 0.0, 0.18, 0.3, 0.72, 1.0], 1.0).unwrap()
         );
     }
 
     #[test]
     fn test_for_all() {
-        let left = CDF::new(vec![0.0, 0.5, 0.75, 1.0], 0.25).unwrap();
-        let right = CDF::new(vec![0.0, 0.25, 0.5, 1.0], 0.25).unwrap();
+        let left = CDF::new(&[0.0, 0.5, 0.75, 1.0], 0.25).unwrap();
+        let right = CDF::new(&[0.0, 0.25, 0.5, 1.0], 0.25).unwrap();
         let result = left.for_all(&right).unwrap();
-        assert_eq!(
-            result,
-            CDF::new(vec![0.0, 0.12501, 0.375, 1.0], 0.25).unwrap()
-        );
+        assert_eq!(result, CDF::new(&[0.0, 0.12501, 0.375, 1.0], 0.25).unwrap());
     }
 
     #[test]
     fn test_for_some() {
-        let left = CDF::new(vec![0.0, 0.5, 0.75, 1.0], 0.25).unwrap();
-        let right = CDF::new(vec![0.0, 0.25, 0.5, 1.0], 0.25).unwrap();
+        let left = CDF::new(&[0.0, 0.5, 0.75, 1.0], 0.25).unwrap();
+        let right = CDF::new(&[0.0, 0.25, 0.5, 1.0], 0.25).unwrap();
         let result = left.for_some(&right).unwrap();
-        assert_eq!(
-            result,
-            CDF::new(vec![0.0, 0.62499, 0.875, 1.0], 0.25).unwrap()
-        );
+        assert_eq!(result, CDF::new(&[0.0, 0.62499, 0.875, 1.0], 0.25).unwrap());
     }
 
     #[test]
     fn partial_ord() {
-        let left = CDF::new(vec![0.0, 0.3, 0.3, 1.0], 1.0).unwrap();
-        let right = CDF::new(vec![0.0, 0.0, 0.6, 1.0], 1.0).unwrap();
-        let top = CDF::new(vec![0.0, 0.3, 0.6, 1.0], 1.0).unwrap();
-        let bottom = CDF::new(vec![0.0, 0.0, 0.3, 1.0], 1.0).unwrap();
+        let left = CDF::new(&[0.0, 0.3, 0.3, 1.0], 1.0).unwrap();
+        let right = CDF::new(&[0.0, 0.0, 0.6, 1.0], 1.0).unwrap();
+        let top = CDF::new(&[0.0, 0.3, 0.6, 1.0], 1.0).unwrap();
+        let bottom = CDF::new(&[0.0, 0.0, 0.3, 1.0], 1.0).unwrap();
         assert_ne!(left, right);
         assert!(!(left < right));
         assert!(!(right > left));
