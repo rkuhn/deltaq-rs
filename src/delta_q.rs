@@ -126,12 +126,17 @@ impl DeltaQ {
         }
     }
 
-    pub fn eval(&self, ctx: &mut BTreeMap<String, DeltaQ>) -> Result<CDF, DeltaQError> {
+    pub fn eval(
+        &self,
+        ctx: &mut BTreeMap<String, (DeltaQ, Option<CDF>)>,
+    ) -> Result<CDF, DeltaQError> {
         match self {
             DeltaQ::Name(n) => {
-                if let Some(dq) = ctx.remove(n) {
+                if let Some((_, Some(cdf))) = ctx.get(n) {
+                    Ok(cdf.clone())
+                } else if let Some((dq, _)) = ctx.remove(n) {
                     let ret = dq.eval(ctx)?;
-                    ctx.insert(n.to_owned(), dq);
+                    ctx.insert(n.to_owned(), (dq, Some(ret.clone())));
                     Ok(ret)
                 } else {
                     Err(DeltaQError::NameError(n.to_owned()))
@@ -267,35 +272,50 @@ mod tests {
     #[test]
     fn test_scenario_from_paper_64k() {
         let mut ctx = btreemap! {
-            "single".to_owned() => DeltaQ::cdf(CDF::step(
-                &[(0.024, 1.0 / 3.0), (0.143, 2.0 / 3.0), (0.531, 1.0)],
-                0.01,
-                300,
-            )
-            .unwrap()),
-            "model2".to_owned() => DeltaQ::choice(
-                DeltaQ::name("single"),
-                1.0,
-                DeltaQ::seq(DeltaQ::name("single"), DeltaQ::name("single")),
-                100.0,
+            "single".to_owned() => (
+                DeltaQ::cdf(CDF::step(
+                    &[(0.024, 1.0 / 3.0), (0.143, 2.0 / 3.0), (0.531, 1.0)],
+                    0.01,
+                    300,
+                )
+                .unwrap()),
+                None
             ),
-            "model3".to_owned() => DeltaQ::choice(
-                DeltaQ::name("single"),
-                1.0,
-                DeltaQ::seq(DeltaQ::name("single"), DeltaQ::name("model2")),
-                100.0,
+            "model2".to_owned() => (
+                DeltaQ::choice(
+                    DeltaQ::name("single"),
+                    1.0,
+                    DeltaQ::seq(DeltaQ::name("single"), DeltaQ::name("single")),
+                    100.0,
+                ),
+                None
             ),
-            "model4".to_owned() => DeltaQ::choice(
-                DeltaQ::name("single"),
-                1.0,
-                DeltaQ::seq(DeltaQ::name("single"), DeltaQ::name("model3")),
-                100.0,
+            "model3".to_owned() => (
+                DeltaQ::choice(
+                    DeltaQ::name("single"),
+                    1.0,
+                    DeltaQ::seq(DeltaQ::name("single"), DeltaQ::name("model2")),
+                    100.0,
+                ),
+                None
             ),
-            "model5".to_owned() => DeltaQ::choice(
-                DeltaQ::name("single"),
-                1.0,
-                DeltaQ::seq(DeltaQ::name("single"), DeltaQ::name("model4")),
-                100.0,
+            "model4".to_owned() => (
+                DeltaQ::choice(
+                    DeltaQ::name("single"),
+                    1.0,
+                    DeltaQ::seq(DeltaQ::name("single"), DeltaQ::name("model3")),
+                    100.0,
+                ),
+                None
+            ),
+            "model5".to_owned() => (
+                DeltaQ::choice(
+                    DeltaQ::name("single"),
+                    1.0,
+                    DeltaQ::seq(DeltaQ::name("single"), DeltaQ::name("model4")),
+                    100.0,
+                ),
+                None
             ),
         };
         let result = DeltaQ::name("model5").eval(&mut ctx).unwrap();
@@ -305,13 +325,16 @@ mod tests {
     #[test]
     fn test_recursive_deltaq() {
         let mut ctx = btreemap! {
-            "recursive".to_owned() => DeltaQ::choice(
-                DeltaQ::name("base"),
-                1.0,
-                DeltaQ::seq(DeltaQ::name("base"), DeltaQ::name("recursive")),
-                1.0,
+            "recursive".to_owned() => (
+                DeltaQ::choice(
+                    DeltaQ::name("base"),
+                    1.0,
+                    DeltaQ::seq(DeltaQ::name("base"), DeltaQ::name("recursive")),
+                    1.0,
+                ),
+                None
             ),
-            "base".to_owned() => DeltaQ::cdf(CDF::new(&[0.0, 0.5, 1.0], 1.0).unwrap()),
+            "base".to_owned() => (DeltaQ::cdf(CDF::new(&[0.0, 0.5, 1.0], 1.0).unwrap()), None),
         };
         let result = DeltaQ::name("recursive").eval(&mut ctx).unwrap_err();
         assert_eq!(result, DeltaQError::NameError("recursive".to_owned()));
