@@ -12,7 +12,7 @@ The first step is to provide a library for manipulating CDFs, offering all opera
 
 The second step yields an internal DSL for creating ΔQ expressions and printing them. [DONE]
 
-The third step provides evaluation of ΔQ expressions as defined in the paper.
+The third step provides evaluation of ΔQ expressions as defined in the paper. [DONE]
 This will later be expanded to include some exponentiation-like operator that simplifies expressing a randomly chosen repetition count for some sub-expression (as frequently occurs in gossip protocols).
 
 The fourth step adds a web UI to expose the internal DSL to no-code users.
