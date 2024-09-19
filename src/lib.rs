@@ -4,6 +4,6 @@ mod delta_q;
 mod render;
 
 pub use cdf::{CDFError, CDF};
-pub use delta_q::DeltaQ;
+pub use delta_q::{DeltaQ, EvaluationContext};
 #[cfg(feature = "web")]
 pub use render::DeltaQComponent;

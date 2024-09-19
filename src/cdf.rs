@@ -30,7 +30,7 @@ impl std::error::Error for CDFError {}
 
 /// A Cumulative Distribution Function (CDF) is a representation of a probability
 /// distribution that can be manipulated in various ways.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CDF {
     data: Vec<u16>,
     bin_size: f64,

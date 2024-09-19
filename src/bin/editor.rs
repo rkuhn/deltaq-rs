@@ -1,8 +1,15 @@
+use actix_web::{delete, put};
 use actix_web::{get, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
+use deltaq_rs::{DeltaQ, EvaluationContext, CDF};
 use include_dir::{include_dir, Dir};
+use parking_lot::Mutex;
 use std::io;
 
 static ASSETS: Dir = include_dir!("$CARGO_MANIFEST_DIR/dist");
+
+struct Data {
+    ctx: Mutex<EvaluationContext>,
+}
 
 #[get("/")]
 async fn index() -> impl Responder {
@@ -38,11 +45,70 @@ async fn assets(req: HttpRequest) -> impl Responder {
     )
 }
 
+#[get("/delta_q")]
+async fn delta_q(data: web::Data<Data>) -> impl Responder {
+    HttpResponse::Ok().json(&*data.ctx.lock())
+}
+
+#[get("/delta_q/{name}")]
+async fn get_delta_q(data: web::Data<Data>, name: web::Path<String>) -> impl Responder {
+    let mut ctx = data.ctx.lock();
+    match ctx.eval(&name) {
+        Ok(dq) => HttpResponse::Ok().json(dq),
+        Err(e) => HttpResponse::NotFound().body(e.to_string()),
+    }
+}
+
+#[put("/delta_q/{name}")]
+async fn put_delta_q(
+    data: web::Data<Data>,
+    name: web::Path<String>,
+    dq: web::Json<DeltaQ>,
+) -> impl Responder {
+    let mut ctx = data.ctx.lock();
+    ctx.put(name.into_inner(), dq.into_inner());
+    HttpResponse::Ok().finish()
+}
+
+#[delete("/delta_q/{name}")]
+async fn delete_delta_q(data: web::Data<Data>, name: web::Path<String>) -> impl Responder {
+    let mut ctx = data.ctx.lock();
+    if ctx.remove(&name).is_some() {
+        HttpResponse::Ok().finish()
+    } else {
+        HttpResponse::NotFound().finish()
+    }
+}
+
 #[actix_web::main]
 async fn main() -> io::Result<()> {
-    let server = HttpServer::new(|| {
+    let data = web::Data::new(Data {
+        ctx: Mutex::new(EvaluationContext::default()),
+    });
+
+    // add two delta_q to the context
+    let mut ctx = data.ctx.lock();
+    ctx.put(
+        "cdf".to_owned(),
+        DeltaQ::cdf(CDF::step(&[(0.1, 0.33), (0.2, 0.66), (0.4, 1.0)], 0.01, 300).unwrap()),
+    );
+    ctx.put(
+        "out".to_owned(),
+        DeltaQ::seq(
+            DeltaQ::name("cdf"),
+            DeltaQ::choice(DeltaQ::name("cdf"), 0.5, DeltaQ::name("cdf"), 0.5),
+        ),
+    );
+    drop(ctx);
+
+    let server = HttpServer::new(move || {
         App::new()
+            .app_data(data.clone())
             .service(index)
+            .service(delta_q)
+            .service(get_delta_q)
+            .service(put_delta_q)
+            .service(delete_delta_q)
             .route("/{f:.*}", web::get().to(assets))
     })
     .workers(1);
