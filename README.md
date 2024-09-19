@@ -15,7 +15,7 @@ The second step yields an internal DSL for creating ΔQ expressions and printing
 The third step provides evaluation of ΔQ expressions as defined in the paper. [DONE]
 This will later be expanded to include some exponentiation-like operator that simplifies expressing a randomly chosen repetition count for some sub-expression (as frequently occurs in gossip protocols).
 
-The fourth step adds a web UI to expose the internal DSL to no-code users.
+The fourth step adds a web UI to expose the internal DSL to no-code users. [DONE]
 The interaction with a ΔQ expression shall closely resemble the refinement approach for system modelling as defined in the paper.
 It will allow the system designer to see immediately the result of the current model and how its computed attenuation compares to the expectation or constraints.
 
@@ -26,3 +26,12 @@ It is expected that while the same system model can be used for both aspects, th
 
 Since the timing CDFs don't model load dependence, they are only representative of the unloaded system.
 The results of the load analysis will indicate where and under which conditions this assumption will be broken, but it isn't obvious how to feed that information back into a changed CDF to adapt the timeliness analysis to those circumstances.
+
+## Building and Running
+
+The build comprises two steps:
+
+- `trunk build` (i.e. you’ll need to `cargo install --locked trunk` first)
+- `cargo run --bin editor`
+
+The first one builds the web app in the `dist/` folder, which the second one then integrates into the single-binary application that will serve HTTP resources on port 8080 when run.

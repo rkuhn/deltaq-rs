@@ -48,6 +48,10 @@ impl EvaluationContext {
     pub fn eval(&mut self, name: &str) -> Result<CDF, DeltaQError> {
         DeltaQ::name(name).eval(self)
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &DeltaQ)> {
+        self.ctx.iter().map(|(k, (v, _))| (k, v))
+    }
 }
 
 impl From<BTreeMap<String, DeltaQ>> for EvaluationContext {

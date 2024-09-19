@@ -24,13 +24,9 @@ impl Component for DeltaQComponent {
         false
     }
 
-    fn changed(&mut self, _ctx: &Context<Self>, props: &Self::Properties) -> bool {
-        if self.delta_q != props.delta_q {
-            self.delta_q = props.delta_q.clone();
-            true
-        } else {
-            false
-        }
+    fn changed(&mut self, ctx: &Context<Self>, _old_props: &Self::Properties) -> bool {
+        self.delta_q = ctx.props().delta_q.clone();
+        true
     }
 
     fn view(&self, _ctx: &Context<Self>) -> Html {
@@ -46,7 +42,7 @@ impl DeltaQComponent {
     fn render_delta_q(&self, delta_q: &DeltaQ) -> Html {
         match delta_q {
             DeltaQ::Name(name) => html! { <span>{ name }</span> },
-            DeltaQ::CDF(cdf) => html! { <span>{ format!("{:?}", cdf) }</span> },
+            DeltaQ::CDF(cdf) => html! { <span>{ format!("{}", cdf) }</span> },
             DeltaQ::Seq(first, second) => html! {
                 <span>
                     { self.render_delta_q(first) }
