@@ -96,7 +96,15 @@ async fn main() -> io::Result<()> {
         "out".to_owned(),
         DeltaQ::seq(
             DeltaQ::name("cdf"),
-            DeltaQ::choice(DeltaQ::name("cdf"), 0.5, DeltaQ::name("cdf"), 0.5),
+            DeltaQ::choice(
+                DeltaQ::name("cdf"),
+                0.5,
+                DeltaQ::for_all(
+                    DeltaQ::name("cdf"),
+                    DeltaQ::seq(DeltaQ::name("cdf"), DeltaQ::name("cdf")),
+                ),
+                3.0,
+            ),
         ),
     );
     drop(ctx);
