@@ -1,3 +1,10 @@
+macro_rules! cloned {
+    ($($name:ident),*; $e:expr) => {{
+        $(let $name = $name.clone();)*
+        $e
+    }};
+}
+
 mod cdf;
 mod delta_q;
 #[cfg(feature = "web")]

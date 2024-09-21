@@ -1,1 +1,5 @@
-[build]
+[serve]
+port = 8081
+
+[[proxy]]
+backend = "http://localhost:8080/delta_q"

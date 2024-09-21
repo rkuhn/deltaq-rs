@@ -1,63 +1,66 @@
 use deltaq_rs::{DeltaQComponent, EvaluationContext, CDF};
 use gloo_utils::format::JsValueSerdeExt;
+use html::RenderResult;
+use std::rc::Rc;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use yew::prelude::*;
-use yew::suspense::{use_future, use_future_with};
+use yew::suspense::use_future_with;
+
+#[hook]
+fn use_json<D: PartialEq + 'static, T: for<'a> serde::Deserialize<'a>>(
+    dep: D,
+    url: impl Fn(Rc<D>) -> Result<String, JsValue> + 'static,
+) -> RenderResult<Result<T, String>> {
+    let window = web_sys::window().unwrap();
+    let json = use_future_with(dep, move |dep| async move {
+        match url(dep) {
+            Ok(url) => {
+                JsFuture::from(
+                    JsFuture::from(window.fetch_with_str(&url))
+                        .await?
+                        .dyn_into::<web_sys::Response>()?
+                        .json()?,
+                )
+                .await
+            }
+            Err(e) => Err(e),
+        }
+    })?;
+    Ok(match &*json {
+        Ok(cdf) => match cdf.into_serde::<T>() {
+            Ok(cdf) => Ok(cdf),
+            Err(e) => Err(format!("Deserialisation error: {}", e)),
+        },
+        Err(e) => Err(format!("Error: {e:?}")),
+    })
+}
 
 #[function_component(AppMain)]
 fn app_main() -> HtmlResult {
-    let window = web_sys::window().unwrap();
-    let location = window.location().href().unwrap();
-    let data = use_future({
-        let window = window.clone();
-        let location = location.clone();
-        move || async move {
-            JsFuture::from(
-                JsFuture::from(window.fetch_with_str(&format!("{location}delta_q")))
-                    .await?
-                    .dyn_into::<web_sys::Response>()?
-                    .json()?,
-            )
-            .await
-        }
-    })?;
+    let location = web_sys::window().unwrap().location().href().unwrap();
+    let location2 = location.clone();
 
-    let selected = use_state(|| None);
+    let ctx =
+        match use_json::<_, EvaluationContext>((), move |_| Ok(format!("{location2}delta_q")))? {
+            Ok(ctx) => ctx,
+            Err(e) => return Ok(html! { <p>{ e }</p> }),
+        };
+
+    let selected = use_state(|| Some("out".to_owned()));
     let onclick = {
         let selected = selected.clone();
         Callback::from(move |n| selected.set(Some(n)))
     };
 
-    let cdf_json = use_future_with(selected.clone(), move |selected| async move {
-        if let Some(name) = &**selected {
-            JsFuture::from(
-                JsFuture::from(window.fetch_with_str(&format!("{location}delta_q/{}", *name)))
-                    .await?
-                    .dyn_into::<web_sys::Response>()?
-                    .json()?,
-            )
-            .await
-        } else {
-            Ok(JsValue::NULL)
-        }
-    })?;
-    let cdf = match &*cdf_json {
-        Ok(cdf) => match cdf.into_serde::<CDF>() {
-            Ok(cdf) => cdf.to_string(),
-            Err(e) => format!("Deserialisation error: {}", e),
-        },
-        Err(e) => format!("Error: {e:?}"),
-    };
-
-    let ctx = match &*data {
-        Ok(dq) => match dq.into_serde::<EvaluationContext>() {
-            Ok(dq) => dq,
-            Err(e) => return Ok(html! { <p>{ format!("Deserialisation error: {}", e) }</p> }),
-        },
-
-        Err(e) => return Ok(html! { <p>{ format!("Error: {e:?}") }</p> }),
-    };
+    let cdf = use_json::<_, CDF>(selected.clone(), move |selected| {
+        (**selected)
+            .as_ref()
+            .ok_or(JsValue::NULL)
+            .map(|s| format!("{location}delta_q/{}", s))
+    })?
+    .map(|cdf| cdf.to_string())
+    .unwrap_or_else(|e| e);
 
     let ctx = use_state(move || ctx);
     let update = {

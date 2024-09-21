@@ -7,6 +7,7 @@ use std::fmt::{self, Display};
 pub enum DeltaQError {
     CDFError(CDFError),
     NameError(String),
+    BlackBox,
 }
 
 impl std::error::Error for DeltaQError {}
@@ -16,6 +17,7 @@ impl Display for DeltaQError {
         match self {
             DeltaQError::CDFError(e) => write!(f, "CDF error: {}", e),
             DeltaQError::NameError(name) => write!(f, "Name error: {}", name),
+            DeltaQError::BlackBox => write!(f, "Black box encountered"),
         }
     }
 }
@@ -80,6 +82,8 @@ impl Into<BTreeMap<String, DeltaQ>> for EvaluationContext {
 /// - Existential quantifications are printed as `∃(A|B)`.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum DeltaQ {
+    /// Un unelaborated and unknown DeltaQ.
+    BlackBox,
     /// A named DeltaQ that can be referenced elsewhere.
     Name(String),
     /// A CDF that is used as a DeltaQ.
@@ -140,6 +144,9 @@ impl DeltaQ {
 
     fn display(&self, f: &mut fmt::Formatter<'_>, parens: bool) -> fmt::Result {
         match self {
+            DeltaQ::BlackBox => {
+                write!(f, "■")
+            }
             DeltaQ::Name(name) => {
                 write!(f, "{}", name)
             }
@@ -181,6 +188,7 @@ impl DeltaQ {
 
     pub fn eval(&self, ctx: &mut EvaluationContext) -> Result<CDF, DeltaQError> {
         match self {
+            DeltaQ::BlackBox => Err(DeltaQError::BlackBox),
             DeltaQ::Name(n) => {
                 if let Some((_, Some(cdf))) = ctx.ctx.get(n) {
                     Ok(cdf.clone())
