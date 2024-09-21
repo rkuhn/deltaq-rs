@@ -1,11 +1,17 @@
-use deltaq_rs::{DeltaQComponent, EvaluationContext, CDF};
-use gloo_utils::format::JsValueSerdeExt;
+macro_rules! cloned {
+    ($($name:ident),*; $e:expr) => {{
+        $(let $name = $name.clone();)*
+        $e
+    }};
+}
+
+use deltaq_rs::{DeltaQ, DeltaQComponent, EvaluationContext, CDF};
 use html::RenderResult;
 use std::rc::Rc;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
-use yew::prelude::*;
-use yew::suspense::use_future_with;
+use web_sys::{console, RequestInit};
+use yew::{platform, prelude::*, suspense::use_future_with};
 
 #[hook]
 fn use_json<D: PartialEq + 'static, T: for<'a> serde::Deserialize<'a>>(
@@ -20,7 +26,7 @@ fn use_json<D: PartialEq + 'static, T: for<'a> serde::Deserialize<'a>>(
                     JsFuture::from(window.fetch_with_str(&url))
                         .await?
                         .dyn_into::<web_sys::Response>()?
-                        .json()?,
+                        .text()?,
                 )
                 .await
             }
@@ -28,12 +34,45 @@ fn use_json<D: PartialEq + 'static, T: for<'a> serde::Deserialize<'a>>(
         }
     })?;
     Ok(match &*json {
-        Ok(cdf) => match cdf.into_serde::<T>() {
+        Ok(cdf) => match serde_json::from_str::<T>(&cdf.as_string().unwrap()) {
             Ok(cdf) => Ok(cdf),
-            Err(e) => Err(format!("Deserialisation error: {}", e)),
+            Err(e) => Err(format!("{cdf:?} Deserialisation error: {}", e)),
         },
         Err(e) => Err(format!("Error: {e:?}")),
     })
+}
+
+async fn put_json<T: serde::Serialize>(url: &str, value: T) -> Result<JsValue, JsValue> {
+    let window = web_sys::window().unwrap();
+    let value = serde_json::to_string(&value).unwrap();
+    let init = RequestInit::new();
+    init.set_method("PUT");
+    {
+        let headers = web_sys::Headers::new().unwrap();
+        headers.set("Content-Type", "application/json").unwrap();
+        init.set_headers(&headers);
+    }
+    init.set_body(&value.into());
+    JsFuture::from(
+        JsFuture::from(window.fetch_with_str_and_init(url, &init))
+            .await?
+            .dyn_into::<web_sys::Response>()?
+            .text()?,
+    )
+    .await
+}
+
+async fn delete_path(url: &str) -> Result<JsValue, JsValue> {
+    let window = web_sys::window().unwrap();
+    let init = RequestInit::new();
+    init.set_method("DELETE");
+    JsFuture::from(
+        JsFuture::from(window.fetch_with_str_and_init(url, &init))
+            .await?
+            .dyn_into::<web_sys::Response>()?
+            .text()?,
+    )
+    .await
 }
 
 #[function_component(AppMain)]
@@ -48,33 +87,39 @@ fn app_main() -> HtmlResult {
         };
 
     let selected = use_state(|| Some("out".to_owned()));
-    let onclick = {
-        let selected = selected.clone();
-        Callback::from(move |n| selected.set(Some(n)))
-    };
+    let onclick = cloned!(selected; Callback::from(move |n| selected.set(Some(n))));
 
-    let cdf = use_json::<_, CDF>(selected.clone(), move |selected| {
-        (**selected)
-            .as_ref()
-            .ok_or(JsValue::NULL)
-            .map(|s| format!("{location}delta_q/{}", s))
-    })?
+    // epoch counter to trigger recomputation when the context changes
+    let epoch = use_state(|| 0);
+
+    let cdf = use_json::<_, CDF>(
+        (selected.clone(), epoch.clone()),
+        cloned!(location; move |selected| {
+            (*selected)
+                .0
+                .as_ref()
+                .ok_or(JsValue::NULL)
+                .map(|s| format!("{location}delta_q/{}", s))
+        }),
+    )?
     .map(|cdf| cdf.to_string())
     .unwrap_or_else(|e| e);
 
     let ctx = use_state(move || ctx);
-    let update = {
-        let ctx = ctx.clone();
-        let selected = selected.clone();
-        Callback::from(move |dq| {
+    let update = cloned!(ctx, selected, epoch, location;
+        Callback::from(move |dq: DeltaQ| {
             let Some(name) = (*selected).clone() else {
                 return;
             };
             let mut cx = (*ctx).clone();
-            cx.put(name, dq);
+            cx.put(name.clone(), dq.clone());
             ctx.set(cx);
+            platform::spawn_local(cloned!(epoch, location, name; async move {
+                put_json(&format!("{location}delta_q/{name}"), dq).await.unwrap();
+                epoch.set(*epoch + 1);
+            }));
         })
-    };
+    );
 
     let mut sel_found = false;
     let list_items = ctx

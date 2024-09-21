@@ -1,6 +1,7 @@
 use crate::CDFError;
 use crate::CDF;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fmt::{self, Display};
 
 #[derive(Debug, PartialEq)]
@@ -32,14 +33,39 @@ impl From<CDFError> for DeltaQError {
 #[serde(from = "BTreeMap<String, DeltaQ>", into = "BTreeMap<String, DeltaQ>")]
 pub struct EvaluationContext {
     ctx: BTreeMap<String, (DeltaQ, Option<CDF>)>,
+    deps: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl EvaluationContext {
     pub fn put(&mut self, name: String, delta_q: DeltaQ) {
+        // first remove all computed values that depend on this name
+        let mut to_remove = vec![name.clone()];
+        while let Some(name) = to_remove.pop() {
+            if self.ctx.get_mut(&name).and_then(|x| x.1.take()).is_some() {
+                for (k, v) in self.deps.iter() {
+                    if v.contains(&name) {
+                        to_remove.push(k.clone());
+                    }
+                }
+            }
+        }
+        self.deps.insert(name.clone(), delta_q.deps());
         self.ctx.insert(name, (delta_q, None));
     }
 
     pub fn remove(&mut self, name: &str) -> Option<DeltaQ> {
+        // first remove all computed values that depend on this name
+        let mut to_remove = vec![name.to_owned()];
+        while let Some(name) = to_remove.pop() {
+            if self.ctx.get_mut(&name).and_then(|x| x.1.take()).is_some() {
+                for (k, v) in self.deps.iter() {
+                    if v.contains(&name) {
+                        to_remove.push(k.clone());
+                    }
+                }
+            }
+        }
+        self.deps.remove(name);
         self.ctx.remove(name).map(|(dq, _)| dq)
     }
 
@@ -58,8 +84,10 @@ impl EvaluationContext {
 
 impl From<BTreeMap<String, DeltaQ>> for EvaluationContext {
     fn from(value: BTreeMap<String, DeltaQ>) -> Self {
+        let deps = value.iter().map(|(k, v)| (k.clone(), v.deps())).collect();
         Self {
             ctx: value.into_iter().map(|(k, v)| (k, (v, None))).collect(),
+            deps,
         }
     }
 }
@@ -140,6 +168,38 @@ impl DeltaQ {
     /// Create a new DeltaQ from an existential quantification over two DeltaQs.
     pub fn for_some(first: DeltaQ, second: DeltaQ) -> DeltaQ {
         DeltaQ::ForSome(Box::new(first), Box::new(second))
+    }
+
+    pub fn deps(&self) -> BTreeSet<String> {
+        match self {
+            DeltaQ::BlackBox => BTreeSet::new(),
+            DeltaQ::Name(name) => {
+                let mut deps = BTreeSet::new();
+                deps.insert(name.clone());
+                deps
+            }
+            DeltaQ::CDF(_) => BTreeSet::new(),
+            DeltaQ::Seq(first, second) => {
+                let mut deps = first.deps();
+                deps.extend(second.deps());
+                deps
+            }
+            DeltaQ::Choice(first, _, second, _) => {
+                let mut deps = first.deps();
+                deps.extend(second.deps());
+                deps
+            }
+            DeltaQ::ForAll(first, second) => {
+                let mut deps = first.deps();
+                deps.extend(second.deps());
+                deps
+            }
+            DeltaQ::ForSome(first, second) => {
+                let mut deps = first.deps();
+                deps.extend(second.deps());
+                deps
+            }
+        }
     }
 
     fn display(&self, f: &mut fmt::Formatter<'_>, parens: bool) -> fmt::Result {

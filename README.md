@@ -16,8 +16,8 @@ The third step provides evaluation of ΔQ expressions as defined in the paper. [
 This will later be expanded to include some exponentiation-like operator that simplifies expressing a randomly chosen repetition count for some sub-expression (as frequently occurs in gossip protocols).
 
 The fourth step adds a web UI to expose the internal DSL to no-code users. [DONE]
-The interaction with a ΔQ expression shall closely resemble the refinement approach for system modelling as defined in the paper.
-It will allow the system designer to see immediately the result of the current model and how its computed attenuation compares to the expectation or constraints.
+The interaction with a ΔQ expression shall closely resemble the refinement approach for system modelling as defined in the paper. [DONE]
+It will allow the system designer to see immediately the result of the current model [DONE] and how its computed attenuation compares to the expectation or constraints.
 
 In addition and in parallel to the above, the theory shall be better understood and where required enhanced to support not only timeliness analysis but also load prediction.
 It is expected that while the same system model can be used for both aspects, the inputs for the load analysis need to be somewhat different from CDFs, i.e. they will likely require more information.
