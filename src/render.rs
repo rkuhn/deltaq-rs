@@ -11,28 +11,90 @@ pub struct Props {
 
 #[function_component(DeltaQComponent)]
 pub fn delta_q_component(props: &Props) -> Html {
+    let on_change = props.on_change.clone();
     match &props.delta_q {
         DeltaQ::BlackBox => {
-            html! { <div style="background-color: black; border-radius: 50%; margin: 4px; padding: 16px;" /> }
+            html! { <BlackBox {on_change} /> }
         }
         DeltaQ::Name(name) => {
-            html! { <div style="border: 4px solid orange; border-radius: 50%; margin: 4px; padding: 4px;">{ name }</div> }
+            html! { <NameComponent name={name.clone()} {on_change} /> }
         }
         DeltaQ::CDF(cdf) => {
-            html! { <div style="border: 4px solid orange; margin: 4px; padding: 4px;">{ format!("{}", cdf) }</div> }
+            html! { <div class={classes!("cdf")}>{ format!("{}", cdf) }</div> }
         }
         DeltaQ::Seq(first, second) => {
-            html!(<Seq first={(**first).clone()} second={(**second).clone()} on_change={props.on_change.clone()} />)
+            html!(<Seq first={(**first).clone()} second={(**second).clone()} {on_change} />)
         }
         DeltaQ::Choice(first, first_weight, second, second_weight) => {
-            html!(<Branch top={(**first).clone()} bottom={(**second).clone()} on_change={props.on_change.clone()} kind={BranchKind::Choice(*first_weight, *second_weight)} />)
+            html!(<Branch top={(**first).clone()} bottom={(**second).clone()} {on_change} kind={BranchKind::Choice(*first_weight, *second_weight)} />)
         }
         DeltaQ::ForAll(first, second) => {
-            html!(<Branch top={(**first).clone()} bottom={(**second).clone()} kind={BranchKind::ForAll} on_change={props.on_change.clone()} />)
+            html!(<Branch top={(**first).clone()} bottom={(**second).clone()} kind={BranchKind::ForAll} {on_change} />)
         }
         DeltaQ::ForSome(first, second) => {
-            html!(<Branch top={(**first).clone()} bottom={(**second).clone()} kind={BranchKind::ForSome} on_change={props.on_change.clone()} />)
+            html!(<Branch top={(**first).clone()} bottom={(**second).clone()} kind={BranchKind::ForSome} {on_change} />)
         }
+    }
+}
+
+#[derive(Properties, Clone, PartialEq)]
+pub struct BlackBoxProps {
+    pub on_change: Callback<DeltaQ>,
+}
+
+#[function_component(BlackBox)]
+pub fn black_box(props: &BlackBoxProps) -> Html {
+    let on_change = props.on_change.clone();
+    let popup = use_state(|| false);
+    let name = use_state(|| "".to_string());
+
+    html! {
+        <div class={classes!("blackBox", "anchor")} onclick={cloned!(popup; move |_| if !*popup { popup.set(true) })}>
+            if *popup {
+                <div class={classes!("popup")}>
+                    <button onclick={cloned!(popup; move |_| popup.set(false))}>{ "abort" }</button>
+                    <span>
+                        <button onclick={cloned!(on_change, name; move |_| on_change.emit(DeltaQ::name(&name)))}>{ "refine" }</button>
+                        <input type="text" value={(*name).clone()} onchange={cloned!(name;
+                            move |e: Event| name.set(e.target_unchecked_into::<HtmlInputElement>().value()))} />
+                    </span>
+                </div>
+            }
+        </div>
+    }
+}
+
+#[derive(Properties, Clone, PartialEq)]
+pub struct NameProps {
+    pub name: String,
+    pub on_change: Callback<DeltaQ>,
+}
+
+#[function_component(NameComponent)]
+pub fn name_component(props: &NameProps) -> Html {
+    let on_change = props.on_change.clone();
+    let popup = use_state(|| false);
+    let name = use_state(|| props.name.clone());
+
+    html! {
+        <div class={classes!("name", "anchor")} onclick={cloned!(popup; move |_| if !*popup { popup.set(true) })}>
+            { &*name }
+            if *popup {
+                <div class={classes!("popup")}>
+                    <button onclick={cloned!(popup; move |_| popup.set(false))}>{ "abort" }</button>
+                    <span>
+                        <button onclick={cloned!(on_change, name, popup; move |_| { popup.set(false); on_change.emit(DeltaQ::Name((*name).clone())) })}>{ "change" }</button>
+                        <input type="text" value={(*name).clone()} onchange={cloned!(name;
+                            move |e: Event| name.set(e.target_unchecked_into::<HtmlInputElement>().value()))} />
+                    </span>
+                    <button onclick={cloned!(on_change, name; move |_| on_change.emit(DeltaQ::seq(DeltaQ::name(&name), DeltaQ::BlackBox)))}>{ "append" }</button>
+                    <button onclick={cloned!(on_change, name; move |_| on_change.emit(DeltaQ::choice(DeltaQ::name(&name), 1.0, DeltaQ::BlackBox, 1.0)))}>{ "make choice" }</button>
+                    <button onclick={cloned!(on_change, name; move |_| on_change.emit(DeltaQ::for_all(DeltaQ::name(&name), DeltaQ::BlackBox)))}>{ "make forAll" }</button>
+                    <button onclick={cloned!(on_change, name; move |_| on_change.emit(DeltaQ::for_some(DeltaQ::name(&name), DeltaQ::BlackBox)))}>{ "make forSome" }</button>
+                    <button onclick={cloned!(on_change; move |_| on_change.emit(DeltaQ::BlackBox))}>{ "black box" }</button>
+                </div>
+            }
+        </div>
     }
 }
 
@@ -64,21 +126,18 @@ pub fn seq(props: &SeqProps) -> Html {
     let popup = use_state(|| false);
 
     html! {
-        <div style="display: flex; flex-direction: row; align-items: center;">
+        <div class={classes!("row", "center", "frame")}>
             <DeltaQComponent delta_q={first.clone()} on_change={on_first_change} />
-            <div style="width: 10px; height: 10px; border: 2px solid black; margin: 4px; position: relative;"
-                onclick={cloned!(popup; move |_| if !*popup { popup.set(true) })}>
+            <div class={classes!("seqSymbol", "anchor")} onclick={cloned!(popup; move |_| if !*popup { popup.set(true) })}>
                 if *popup {
-                    <div style="position: absolute; top: 0; left: 0; background-color: white; border: 1px solid black; padding: 4px; display: flex; flex-direction: column; white-space: nowrap;">
+                    <div class={classes!("popup")}>
                     <button onclick={cloned!(popup; move |_| popup.set(false))}> { "abort" } </button>
+                    <button onclick={cloned!(on_change, first, second; move |_| on_change.emit(DeltaQ::choice(DeltaQ::seq(first.clone(), second.clone()), 1.0, DeltaQ::BlackBox, 1.0)))}> { "make choice" } </button>
+                    <button onclick={cloned!(on_change, first, second; move |_| on_change.emit(DeltaQ::for_all(DeltaQ::seq(first.clone(), second.clone()), DeltaQ::BlackBox)))}> { "make forAll" } </button>
+                    <button onclick={cloned!(on_change, first, second; move |_| on_change.emit(DeltaQ::for_some(DeltaQ::seq(first.clone(), second.clone()), DeltaQ::BlackBox)))}> { "make forSome" } </button>
+                    <button onclick={cloned!(on_change, first, second, popup; move |_| { popup.set(false); on_change.emit(DeltaQ::seq(second.clone(), first.clone())) })}>{ "switch" }</button>
                     <button onclick={cloned!(popup, on_change, first; move |_| { popup.set(false); on_change.emit(first.clone()) })}>{ "keep left" }</button>
                     <button onclick={cloned!(popup, on_change, second; move |_| { popup.set(false); on_change.emit(second.clone()) })}>{ "keep right" }</button>
-                    <button onclick={cloned!(on_change, first, second, popup;
-                        move |_| {
-                            popup.set(false);
-                            on_change.emit(DeltaQ::seq(second.clone(), first.clone()))
-                        })}>
-                        { "switch" }</button>
                     </div>
                 }
             </div>
@@ -106,7 +165,7 @@ pub enum BranchKind {
 pub fn branch_kind_component(props: &BranchProps) -> Html {
     let kind = match &props.kind {
         BranchKind::Choice(first_weight, second_weight) => html! {
-            <div style="display: flex; flex-direction: column; align-items: center;">
+            <div class={classes!("column", "center")}>
                 <div>{first_weight}</div>
                 <div>{"⇌"}</div>
                 <div>{second_weight}</div>
@@ -137,20 +196,19 @@ pub fn branch_kind_component(props: &BranchProps) -> Html {
     });
 
     html!(
-    <div style="display: flex; align-items: center; justify-content: center; padding: 8px; position: relative;"
-        onclick={cloned!(popup; move |_| if !*popup { popup.set(true) })}>
+    <div class={classes!("row", "center", "branchKind", "anchor")} onclick={cloned!(popup; move |_| if !*popup { popup.set(true) })}>
         { kind }
         if *popup {
-            <div style="position: absolute; top: 0; left: 0; background-color: white; border: 1px solid black; padding: 4px; display: flex; flex-direction: column; white-space: nowrap; z-index: 1;">
+            <div class={classes!("popup")}>
                 <button onclick={cloned!(popup; move |_| popup.set(false))}>{ "abort" }</button>
                 <span>
                     <button onclick={cloned!(popup, on_change, top, bottom, top_frac, bottom_frac; move |_| {
                         popup.set(false);
                         on_change.emit(DeltaQ::choice(top.clone(), *top_frac, bottom.clone(), *bottom_frac))
                     })}>{ "make choice" }</button>
-                    <input style="width: 5em;" type="number" value={top_frac.to_string()} onchange={cloned!(top_frac;
+                    <input type="number" value={top_frac.to_string()} onchange={cloned!(top_frac;
                         move |e: Event| top_frac.set(e.target_unchecked_into::<HtmlInputElement>().value_as_number() as f64))} />
-                    <input style="width: 5em;" type="number" value={bottom_frac.to_string()} onchange={cloned!(bottom_frac;
+                    <input type="number" value={bottom_frac.to_string()} onchange={cloned!(bottom_frac;
                         move |e: Event| bottom_frac.set(e.target_unchecked_into::<HtmlInputElement>().value_as_number() as f64))} />
                 </span>
                 <button onclick={cloned!(popup, on_change, top, bottom; move |_| {
@@ -161,6 +219,10 @@ pub fn branch_kind_component(props: &BranchProps) -> Html {
                     popup.set(false);
                     on_change.emit(DeltaQ::for_some(top.clone(), bottom.clone()))
                 })}>{ "make forSome" }</button>
+                <button onclick={cloned!(popup, on_change, top, bottom; move |_| {
+                    popup.set(false);
+                    on_change.emit(DeltaQ::choice(bottom.clone(), *bottom_frac, top.clone(), *top_frac))
+                })}>{ "switch" }</button>
                 <button onclick={cloned!(popup, on_change, top; move |_| { popup.set(false); on_change.emit(top.clone()) })}>{ "keep top" }</button>
                 <button onclick={cloned!(popup, on_change, bottom; move |_| { popup.set(false); on_change.emit(bottom.clone()) })}>{ "keep bottom" }</button>
                 <button onclick={cloned!(on_change; move |_| on_change.emit(DeltaQ::BlackBox))}>{ "black box" }</button>
@@ -199,14 +261,14 @@ fn branch(props: &BranchProps) -> Html {
     ));
 
     html! {
-        <div style="display: flex; flex-direction: row; margin: 4px; border: 1px solid grey;">
+        <div class={classes!("row", "frame")}>
             <BranchKindComponent ..props.clone() />
-            <div style="display: flex; flex-direction: column; align-items: left; border-left: 2px solid black;">
-                <div style="display: flex; flex-direction: row; align-items: left;">
+            <div class={classes!("column", "left")} style="border-left: 2px solid black;">
+                <div class={classes!("row", "left")} >
                     <DeltaQComponent delta_q={top} on_change={on_top_change} />
                 </div>
                 <div style="border: 1px solid black;"></div>
-                <div style="display: flex; flex-direction: row; align-items: left;">
+                <div class={classes!("row", "left")} >
                     <DeltaQComponent delta_q={bottom} on_change={on_bottom_change} />
                 </div>
             </div>
