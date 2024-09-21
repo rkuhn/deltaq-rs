@@ -35,3 +35,6 @@ The build comprises two steps:
 - `cargo run --bin editor`
 
 The first one builds the web app in the `dist/` folder, which the second one then integrates into the single-binary application that will serve HTTP resources on port 8080 when run.
+
+When developing the web UI part you can leave `cargo run --bin editor` running while using `trunk serve` to serve the UI with change detection.
+Requests to the `delta_q/*` endpoints will be proxied.
