@@ -5,13 +5,15 @@ macro_rules! cloned {
     }};
 }
 
+use charts_rs::{Axis, Canvas, Color, Point, Polyline};
 use deltaq_rs::{DeltaQ, DeltaQComponent, EvaluationContext, CDF};
 use html::RenderResult;
+use iter_tools::Itertools;
 use std::rc::Rc;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{console, RequestInit};
-use yew::{platform, prelude::*, suspense::use_future_with};
+use web_sys::RequestInit;
+use yew::{platform, prelude::*, suspense::use_future_with, virtual_dom::VNode};
 
 #[hook]
 fn use_json<D: PartialEq + 'static, T: for<'a> serde::Deserialize<'a>>(
@@ -101,9 +103,7 @@ fn app_main() -> HtmlResult {
                 .ok_or(JsValue::NULL)
                 .map(|s| format!("{location}delta_q/{}", s))
         }),
-    )?
-    .map(|cdf| cdf.to_string())
-    .unwrap_or_else(|e| e);
+    )?;
 
     let ctx = use_state(move || ctx);
     let update = cloned!(ctx, selected, epoch, location;
@@ -143,6 +143,59 @@ fn app_main() -> HtmlResult {
         selected.set(None);
     }
 
+    let cdf = match cdf {
+        Ok(cdf) => {
+            let mut canvas = Canvas::new(310.0, 110.0);
+            let x_scale = 300.0 / cdf.width();
+            canvas.polyline(Polyline {
+                color: Some(Color::black()),
+                stroke_width: 1.0,
+                points: cdf
+                    .iter()
+                    .tuple_windows()
+                    .flat_map(|((x, y), (x2, _))| {
+                        vec![
+                            Point {
+                                x: x * x_scale + 10.0,
+                                y: (1.0 - y) * 100.0 + 1.0,
+                            },
+                            Point {
+                                x: x2 * x_scale + 10.0,
+                                y: (1.0 - y) * 100.0 + 1.0,
+                            },
+                        ]
+                    })
+                    .collect(),
+            });
+            canvas.axis(Axis {
+                stroke_color: Some(Color::black()),
+                left: 10.0,
+                top: 101.0,
+                width: 300.0,
+                split_number: 300,
+                tick_interval: x_scale as usize,
+                ..Default::default()
+            });
+            canvas.axis(Axis {
+                stroke_color: Some(Color::black()),
+                position: charts_rs::Position::Left,
+                top: 1.0,
+                left: 10.0,
+                height: 100.0,
+                split_number: 1,
+                ..Default::default()
+            });
+            let svg = VNode::from_html_unchecked(canvas.svg().unwrap().into());
+            html! {
+                <>
+                    <p>{ "result: " }{cdf.to_string()} </p>
+                    { svg }
+                </>
+            }
+        }
+        Err(e) => html! { <p>{ "no CDF result: " }{ e }</p> },
+    };
+
     Ok(html! {
     <div>
         <p>{ "context:" }</p>
@@ -154,7 +207,7 @@ fn app_main() -> HtmlResult {
             <div style="background-color: #f0f0f0; padding: 4px; margin: 4px; display: flex; flex-direction: row;">
                 <DeltaQComponent delta_q={ctx.get(name).unwrap().clone()} on_change={update} />
             </div>
-            <p>{ "result CDF: " } { cdf }</p>
+            { cdf }
         }
     </div>
     })

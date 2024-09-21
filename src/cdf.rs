@@ -33,7 +33,7 @@ impl std::error::Error for CDFError {}
 #[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CDF {
     data: Vec<u16>,
-    bin_size: f64,
+    bin_size: f32,
 }
 
 impl std::fmt::Debug for CDF {
@@ -51,13 +51,13 @@ impl std::fmt::Display for CDF {
         let mut last_value = 0;
         write!(f, "CDF[")?;
         for (i, &value) in self.data.iter().enumerate() {
-            let value_f64 = (value as f64 / 65535.0).min(1.0);
+            let value_f32 = (value as f32 / 65535.0).min(1.0);
             if value != last_value {
                 if last_value != 0 {
                     write!(f, ", ")?;
                 }
-                let x = i as f64 * self.bin_size;
-                write!(f, "({:.4}, {:.4})", x, value_f64)?;
+                let x = i as f32 * self.bin_size;
+                write!(f, "({:.4}, {:.4})", x, value_f32)?;
                 last_value = value;
             }
         }
@@ -66,11 +66,50 @@ impl std::fmt::Display for CDF {
     }
 }
 
+pub struct CDFIterator<'a> {
+    cdf: &'a CDF,
+    index: usize,
+    last_value: u16,
+    first: bool,
+    last: bool,
+}
+
+impl<'a> Iterator for CDFIterator<'a> {
+    type Item = (f32, f32);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.first {
+            self.first = false;
+            return Some((0.0, 0.0));
+        }
+        while self.index < self.cdf.data.len() {
+            let value = self.cdf.data[self.index];
+            let value_f32 = (value as f32 / 65535.0).min(1.0);
+            if value != self.last_value {
+                let x = self.index as f32 * self.cdf.bin_size;
+                self.last_value = value;
+                self.index += 1;
+                return Some((x, value_f32));
+            }
+            self.index += 1;
+        }
+        if !self.last {
+            self.last = true;
+            Some((
+                self.cdf.width(),
+                (self.last_value as f32 / 65535.0).min(1.0),
+            ))
+        } else {
+            None
+        }
+    }
+}
+
 impl CDF {
     /// Create a new CDF from a vector of data and a bin size.
     /// The data vector must contain values between 0 and 1, and must be
     /// monotonically increasing.
-    pub fn new(data: &[f64], bin_size: f64) -> Result<Self, CDFError> {
+    pub fn new(data: &[f32], bin_size: f32) -> Result<Self, CDFError> {
         if !data.iter().all(|&x| x >= 0.0 && x <= 1.0) {
             return Err(CDFError::InvalidDataRange);
         }
@@ -84,10 +123,25 @@ impl CDF {
         })
     }
 
+    pub fn iter(&self) -> CDFIterator {
+        CDFIterator {
+            cdf: self,
+            index: 0,
+            last_value: 0,
+            first: true,
+            last: false,
+        }
+    }
+
+    /// Get the width of the CDF.
+    pub fn width(&self) -> f32 {
+        self.data.len() as f32 * self.bin_size
+    }
+
     /// Create a step function CDF from a vector of (x, y) pairs.
     /// The x values must be greater than 0 and must be strictly monotonically increasing.
     /// The y values must be from (0, 1] and must be strictly monotonically increasing.
-    pub fn step(points: &[(f64, f64)], bin_size: f64, bins: usize) -> Result<Self, CDFError> {
+    pub fn step(points: &[(f32, f32)], bin_size: f32, bins: usize) -> Result<Self, CDFError> {
         if !points.iter().all(|&(x, y)| x >= 0.0 && y > 0.0 && y <= 1.0) {
             return Err(CDFError::InvalidDataRange);
         }
@@ -112,7 +166,7 @@ impl CDF {
 
     /// Combine two CDFs by choosing between them, using the given fraction as the probability for
     /// the first CDF.
-    pub fn choice(&self, fraction: f64, other: &CDF) -> Result<CDF, CDFError> {
+    pub fn choice(&self, fraction: f32, other: &CDF) -> Result<CDF, CDFError> {
         if self.bin_size != other.bin_size {
             return Err(CDFError::BinSizeMismatch);
         }
@@ -242,7 +296,7 @@ fn mul(x: u16, y: u16) -> u16 {
     ((x as u32 * y as u32 + 65535) >> 16) as u16
 }
 
-fn to_int(x: f64) -> u16 {
+fn to_int(x: f32) -> u16 {
     (x * 65536.0 + 0.5).min(65535.0) as u16
 }
 

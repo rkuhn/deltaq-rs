@@ -119,7 +119,7 @@ pub enum DeltaQ {
     /// The convolution of two DeltaQs, describing the sequential execution of two outcomes.
     Seq(Box<DeltaQ>, Box<DeltaQ>),
     /// A choice between two DeltaQs (i.e. their outcomes), with a given weight of each.
-    Choice(Box<DeltaQ>, f64, Box<DeltaQ>, f64),
+    Choice(Box<DeltaQ>, f32, Box<DeltaQ>, f32),
     /// A DeltaQ that is the result of a universal quantification over two DeltaQs,
     /// meaning that both outcomes must occur.
     ForAll(Box<DeltaQ>, Box<DeltaQ>),
@@ -151,7 +151,7 @@ impl DeltaQ {
     }
 
     /// Create a new DeltaQ from a choice between two DeltaQs.
-    pub fn choice(first: DeltaQ, first_weight: f64, second: DeltaQ, second_weight: f64) -> DeltaQ {
+    pub fn choice(first: DeltaQ, first_weight: f32, second: DeltaQ, second_weight: f32) -> DeltaQ {
         DeltaQ::Choice(
             Box::new(first),
             first_weight,

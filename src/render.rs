@@ -156,7 +156,7 @@ pub struct BranchProps {
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum BranchKind {
-    Choice(f64, f64),
+    Choice(f32, f32),
     ForAll,
     ForSome,
 }
@@ -207,9 +207,9 @@ pub fn branch_kind_component(props: &BranchProps) -> Html {
                         on_change.emit(DeltaQ::choice(top.clone(), *top_frac, bottom.clone(), *bottom_frac))
                     })}>{ "make choice" }</button>
                     <input type="number" value={top_frac.to_string()} onchange={cloned!(top_frac;
-                        move |e: Event| top_frac.set(e.target_unchecked_into::<HtmlInputElement>().value_as_number() as f64))} />
+                        move |e: Event| top_frac.set(e.target_unchecked_into::<HtmlInputElement>().value_as_number() as f32))} />
                     <input type="number" value={bottom_frac.to_string()} onchange={cloned!(bottom_frac;
-                        move |e: Event| bottom_frac.set(e.target_unchecked_into::<HtmlInputElement>().value_as_number() as f64))} />
+                        move |e: Event| bottom_frac.set(e.target_unchecked_into::<HtmlInputElement>().value_as_number() as f32))} />
                 </span>
                 <button onclick={cloned!(popup, on_change, top, bottom; move |_| {
                     popup.set(false);
