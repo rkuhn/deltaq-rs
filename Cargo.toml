@@ -12,7 +12,7 @@ name = "editor-web"
 required-features = ["web"]
 
 [features]
-main = ["actix-web", "include_dir", "parking_lot"]
+main = ["actix-web", "include_dir", "parking_lot", "tracing-subscriber"]
 web = [
   "yew",
   "wasm-bindgen",
@@ -34,6 +34,10 @@ js-sys = { version = "0.3.70", optional = true }
 parking_lot = { version = "0.12.3", optional = true }
 serde = { version = "1.0.210", features = ["derive"] }
 serde_json = { version = "1.0.128", optional = true }
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = [
+  "env-filter",
+], optional = true }
 wasm-bindgen = { version = "0.2.93", optional = true }
 wasm-bindgen-futures = { version = "0.4.43", optional = true }
 yew = { version = "0.21.0", features = ["csr"], optional = true }

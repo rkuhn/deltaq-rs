@@ -4,6 +4,7 @@ use deltaq_rs::{DeltaQ, EvaluationContext, CDF};
 use include_dir::{include_dir, Dir};
 use parking_lot::Mutex;
 use std::io;
+use tracing_subscriber::EnvFilter;
 
 static ASSETS: Dir = include_dir!("$CARGO_MANIFEST_DIR/dist");
 
@@ -13,6 +14,7 @@ struct Data {
 
 #[get("/")]
 async fn index() -> impl Responder {
+    tracing::info!("GET /");
     HttpResponse::Ok().content_type("text/html").body(
         ASSETS
             .get_file("index.html")
@@ -22,6 +24,7 @@ async fn index() -> impl Responder {
 }
 
 async fn assets(req: HttpRequest) -> impl Responder {
+    tracing::info!("GET {}", req.path());
     let path = &req.path()[1..];
     let mime = if let Some(pos) = path.rfind('.') {
         match &path[pos + 1..] {
@@ -47,15 +50,23 @@ async fn assets(req: HttpRequest) -> impl Responder {
 
 #[get("/delta_q")]
 async fn delta_q(data: web::Data<Data>) -> impl Responder {
-    HttpResponse::Ok().json(&*data.ctx.lock())
+    tracing::info!("GET /delta_q");
+    HttpResponse::Ok()
+        .insert_header(("Cache-Control", "no-store"))
+        .json(&*data.ctx.lock())
 }
 
 #[get("/delta_q/{name}")]
 async fn get_delta_q(data: web::Data<Data>, name: web::Path<String>) -> impl Responder {
+    tracing::info!("GET /delta_q/{}", name);
     let mut ctx = data.ctx.lock();
     match ctx.eval(&name) {
-        Ok(dq) => HttpResponse::Ok().json(dq),
-        Err(e) => HttpResponse::NotFound().body(e.to_string()),
+        Ok(dq) => HttpResponse::Ok()
+            .insert_header(("Cache-Control", "no-store"))
+            .json(dq),
+        Err(e) => HttpResponse::NotFound()
+            .insert_header(("Cache-Control", "no-store"))
+            .body(e.to_string()),
     }
 }
 
@@ -65,6 +76,7 @@ async fn put_delta_q(
     name: web::Path<String>,
     dq: web::Json<DeltaQ>,
 ) -> impl Responder {
+    tracing::info!("PUT /delta_q/{}", name);
     let mut ctx = data.ctx.lock();
     ctx.put(name.into_inner(), dq.into_inner());
     HttpResponse::Ok().finish()
@@ -72,6 +84,7 @@ async fn put_delta_q(
 
 #[delete("/delta_q/{name}")]
 async fn delete_delta_q(data: web::Data<Data>, name: web::Path<String>) -> impl Responder {
+    tracing::info!("DELETE /delta_q/{}", name);
     let mut ctx = data.ctx.lock();
     if ctx.remove(&name).is_some() {
         HttpResponse::Ok().finish()
@@ -82,12 +95,17 @@ async fn delete_delta_q(data: web::Data<Data>, name: web::Path<String>) -> impl 
 
 #[actix_web::main]
 async fn main() -> io::Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
+
     let data = web::Data::new(Data {
         ctx: Mutex::new(EvaluationContext::default()),
     });
 
     // add two delta_q to the context
     let mut ctx = data.ctx.lock();
+    ctx.put("black".to_owned(), DeltaQ::BlackBox);
     ctx.put(
         "cdf".to_owned(),
         DeltaQ::cdf(CDF::step(&[(0.1, 0.33), (0.2, 0.66), (0.4, 1.0)], 0.01, 300).unwrap()),
