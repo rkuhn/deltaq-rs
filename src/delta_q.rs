@@ -59,6 +59,7 @@ impl EvaluationContext {
         let mut to_remove = vec![name.to_owned()];
         while let Some(name) = to_remove.pop() {
             if self.ctx.get_mut(&name).and_then(|x| x.1.take()).is_some() {
+                tracing::info!("Removing computed value for {}", name);
                 for (k, v) in self.deps.iter() {
                     if v.contains(&name) {
                         to_remove.push(k.clone());

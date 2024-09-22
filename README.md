@@ -38,3 +38,14 @@ The first one builds the web app in the `dist/` folder, which the second one the
 
 When developing the web UI part you can leave `cargo run --bin editor` running while using `trunk serve` to serve the UI with change detection.
 Requests to the `delta_q/*` endpoints will be proxied.
+
+## Known Shortcomings
+
+- not optimised at all, especially regarding memory usage (need to make cloning cheap for CDF, DeltaQ, etc.) and web assembly size
+- functional but ugly
+- duplicates state management in web app and backend, not yet decided what to put where (currently ΔQ expression evaluation is done in the backend, could easily move to a web worker)
+- no editing of CDFs yet
+- should have export (probably as JSON) and matching import
+- should allow editing the formulas as text, which requires making the syntax more accessible via normal keyboards
+- fixed samples and width for CDF, should be changed to support any step function and compute its width dynamically (with upper bound on details to avoid memory explosion)
+- should add “exponentiation” operator to wrap an expression in another one with a hole for a specified number of times

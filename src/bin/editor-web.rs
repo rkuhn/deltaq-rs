@@ -5,15 +5,13 @@ macro_rules! cloned {
     }};
 }
 
-use charts_rs::{Axis, Canvas, Color, Point, Polyline};
-use deltaq_rs::{DeltaQ, DeltaQComponent, EvaluationContext, CDF};
+use deltaq_rs::{cdf_to_svg, DeltaQ, DeltaQComponent, DeltaQContext, EvaluationContext, CDF};
 use html::RenderResult;
-use iter_tools::Itertools;
 use std::rc::Rc;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
-use web_sys::RequestInit;
-use yew::{platform, prelude::*, suspense::use_future_with, virtual_dom::VNode};
+use web_sys::{HtmlInputElement, RequestInit};
+use yew::{platform, prelude::*, suspense::use_future_with};
 
 #[hook]
 fn use_json<D: PartialEq + 'static, T: for<'a> serde::Deserialize<'a>>(
@@ -105,17 +103,16 @@ fn app_main() -> HtmlResult {
         }),
     )?;
 
-    let ctx = use_state(move || ctx);
-    let update = cloned!(ctx, selected, epoch, location;
-        Callback::from(move |dq: DeltaQ| {
-            let Some(name) = (*selected).clone() else {
-                return;
-            };
-            let mut cx = (*ctx).clone();
-            cx.put(name.clone(), dq.clone());
-            ctx.set(cx);
-            platform::spawn_local(cloned!(epoch, location, name; async move {
-                put_json(&format!("{location}delta_q/{name}"), dq).await.unwrap();
+    let ctx = use_reducer(move || ctx);
+    let on_change = cloned!(ctx, epoch, location;
+        Callback::from(move |(name, dq): (String, Option<DeltaQ>)| {
+            ctx.dispatch((name.clone(), dq.clone()));
+            platform::spawn_local(cloned!(epoch, location; async move {
+                if let Some(dq) = dq {
+                    put_json(&format!("{location}delta_q/{name}"), dq).await.unwrap();
+                } else {
+                    delete_path(&format!("{location}delta_q/{name}")).await.unwrap();
+                }
                 epoch.set(*epoch + 1);
             }));
         })
@@ -128,8 +125,9 @@ fn app_main() -> HtmlResult {
             let name = k.clone();
             let onclick = onclick.clone();
             let mut h = html! {
-                <li onclick={onclick.reform(move |_| name.clone())}>
-                    { format!("{k}: {v}") }
+                <li>
+                    <button onclick={cloned!(name, on_change; move |_| on_change.emit((name.clone(), None)))}>{ "delete "}</button>
+                    <span class={classes!("expression")} style="margin-left: 8px;" onclick={onclick.reform(move |_| name.clone())}>{ format!("{k}: {v}") }</span>
                 </li>
             };
             if selected.as_ref() == Some(k) {
@@ -141,60 +139,21 @@ fn app_main() -> HtmlResult {
         .collect::<Html>();
     if selected.is_some() && !sel_found {
         selected.set(None);
+        // this only takes effect on the next render!
     }
 
+    let dq = selected.as_ref().and_then(|name| ctx.get(name));
+    web_sys::console::log_1(&JsValue::from_str(&format!("{dq:?}")));
+
     let cdf = match cdf {
-        Ok(cdf) => {
-            let mut canvas = Canvas::new(310.0, 110.0);
-            let x_scale = 300.0 / cdf.width();
-            canvas.polyline(Polyline {
-                color: Some(Color::black()),
-                stroke_width: 1.0,
-                points: cdf
-                    .iter()
-                    .tuple_windows()
-                    .flat_map(|((x, y), (x2, _))| {
-                        vec![
-                            Point {
-                                x: x * x_scale + 10.0,
-                                y: (1.0 - y) * 100.0 + 1.0,
-                            },
-                            Point {
-                                x: x2 * x_scale + 10.0,
-                                y: (1.0 - y) * 100.0 + 1.0,
-                            },
-                        ]
-                    })
-                    .collect(),
-            });
-            canvas.axis(Axis {
-                stroke_color: Some(Color::black()),
-                left: 10.0,
-                top: 101.0,
-                width: 300.0,
-                split_number: 300,
-                tick_interval: x_scale as usize,
-                ..Default::default()
-            });
-            canvas.axis(Axis {
-                stroke_color: Some(Color::black()),
-                position: charts_rs::Position::Left,
-                top: 1.0,
-                left: 10.0,
-                height: 100.0,
-                split_number: 1,
-                ..Default::default()
-            });
-            let svg = VNode::from_html_unchecked(canvas.svg().unwrap().into());
-            html! {
-                <>
-                    <p>{ "result: " }{cdf.to_string()} </p>
-                    { svg }
-                </>
-            }
-        }
+        Ok(cdf) => cdf_to_svg(&cdf),
         Err(e) => html! { <p>{ "no CDF result: " }{ e }</p> },
     };
+
+    let add_on_change = on_change.reform(cloned!(selected; move |x: (String, Option<DeltaQ>)| {
+        selected.set(Some(x.0.clone()));
+        x
+    }));
 
     Ok(html! {
     <div>
@@ -202,14 +161,44 @@ fn app_main() -> HtmlResult {
         <ul>
         { list_items }
         </ul>
-        if let Some(name) = selected.as_ref() {
+        <AddExpression on_change={add_on_change} />
+        if let (Some(name), Some(dq)) = (selected.as_ref(), dq) {
             <p>{ "selected: " } { name }</p>
             <div style="background-color: #f0f0f0; padding: 4px; margin: 4px; display: flex; flex-direction: row;">
-                <DeltaQComponent delta_q={ctx.get(name).unwrap().clone()} on_change={update} />
+                <ContextProvider<DeltaQContext> context={DeltaQContext::new(&ctx, &name)}>
+                    <DeltaQComponent delta_q={dq.clone()} {on_change} />
+                </ContextProvider<DeltaQContext>>
             </div>
             { cdf }
         }
     </div>
+    })
+}
+
+#[derive(Properties, PartialEq, Clone)]
+struct AddExpressionProps {
+    on_change: Callback<(String, Option<DeltaQ>)>,
+}
+
+#[function_component(AddExpression)]
+fn add_expression(props: &AddExpressionProps) -> HtmlResult {
+    let name = use_state(|| "".to_owned());
+    let value = (*name).clone();
+    let on_change = props.on_change.clone();
+    let on_submit = cloned!(name, on_change; Callback::from(move |e: SubmitEvent| {
+        e.prevent_default();
+        name.set("".to_owned());
+        on_change.emit(((*name).clone(), Some(DeltaQ::BlackBox)));
+    }));
+    let on_input = Callback::from(move |e: InputEvent| {
+        name.set(e.target_unchecked_into::<HtmlInputElement>().value())
+    });
+
+    Ok(html! {
+        <form onsubmit={on_submit}>
+            <button type="submit">{ "add" }</button>
+            <input type="text" {value} oninput={on_input} />
+        </form>
     })
 }
 
